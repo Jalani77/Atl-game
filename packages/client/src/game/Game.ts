@@ -127,6 +127,18 @@ export class Game {
     this.ui.showNameInput();
   }
 
+  onConnectionError(message: string): void {
+    if (this.gamePhase === 'connecting' || this.gamePhase === 'naming') {
+      this.ui.showConnectionError(message);
+    }
+  }
+
+  retryConnection(): void {
+    this.gamePhase = 'connecting';
+    this.ui.showConnecting();
+    this.network.connect();
+  }
+
   onConnected(playerId: string, sessionToken: string): void {
     this.localPlayerId = playerId;
     localStorage.setItem('campus_rivals_session', sessionToken);

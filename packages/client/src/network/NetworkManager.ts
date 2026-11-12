@@ -9,16 +9,16 @@ export class NetworkManager {
 
   constructor(game: Game) {
     this.game = game;
-    this.serverUrl = import.meta.env.PROD
-      ? window.location.origin
-      : 'http://localhost:3000';
+    this.serverUrl = window.location.origin;
   }
 
   connect(): void {
+    this.socket?.removeAllListeners();
+    this.socket?.disconnect();
     this.socket = io(this.serverUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
     });
 
@@ -37,6 +37,7 @@ export class NetworkManager {
 
     this.socket.on('connect_error', (err) => {
       console.error('Connection error:', err);
+      this.game.onConnectionError(err.message || 'connection failed');
     });
   }
 

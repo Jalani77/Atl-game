@@ -72,12 +72,15 @@ export class UIManager {
     this.currentScreen = this.createScreen(`
       <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);">
         <h1 class="title-font" style="font-size:4rem;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,0.5);margin-bottom:2rem;">CAMPUS RIVALS</h1>
-        <div style="color:#aaa;font-size:1.2rem;">Connecting to server...</div>
+        <div id="connect-status" style="color:#aaa;font-size:1.2rem;max-width:460px;text-align:center;">Connecting to server...</div>
+        <button id="connect-retry" style="display:none;margin-top:1.5rem;padding:0.8rem 1.6rem;border:0;border-radius:8px;background:#3498db;color:#fff;font-weight:700;cursor:pointer;">Retry</button>
         <div style="margin-top:2rem;width:60px;height:60px;border:4px solid #333;border-top-color:#3498db;border-radius:50%;animation:spin 1s linear infinite;"></div>
       </div>
       <style>@keyframes spin{to{transform:rotate(360deg);}}</style>
     `);
     this.uiLayer.appendChild(this.currentScreen);
+    const retry = this.currentScreen.querySelector('#connect-retry') as HTMLButtonElement | null;
+    if (retry) retry.onclick = () => this.game.retryConnection();
   }
 
   showNameInput(): void {
@@ -108,6 +111,22 @@ export class UIManager {
     };
     
     setTimeout(() => input.focus(), 100);
+  }
+
+  showConnectionError(message: string): void {
+    const status = document.getElementById('connect-status');
+    const retry = document.getElementById('connect-retry') as HTMLButtonElement | null;
+    if (!status) {
+      this.showConnecting();
+      this.showConnectionError(message);
+      return;
+    }
+    status.textContent = `Game server is not reachable (${message}). From the project folder run npm run dev, then retry.`;
+    status.style.color = '#f3c1b6';
+    if (retry) {
+      retry.style.display = 'inline-block';
+      retry.onclick = () => this.game.retryConnection();
+    }
   }
 
   showSchoolSelect(): void {
