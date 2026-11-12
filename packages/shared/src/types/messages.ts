@@ -28,7 +28,8 @@ export type ServerMessage =
   | { type: 'buildingPurchased'; building: PlacedBuilding; pads: { removed: string; added: PurchasePadInfo[] } }
   | { type: 'buildingPlaced'; building: PlacedBuilding }
   | { type: 'buildingUpgraded'; instanceId: string; level: number }
-  | { type: 'cashUpdate'; playerId: string; cash: number; income: number }
+  | { type: 'cashUpdate'; playerId: string; cash: number; pending: number; rate: number }
+  | { type: 'produced'; plotId: string; value: number; count: number; grade: string }
   | { type: 'spiritUpdate'; playerId: string; spirit: number }
   | { type: 'damage'; targetId: string; damage: number; health: number; attackerId: string }
   | { type: 'knockout'; targetId: string; attackerId: string; targetType: 'player' | 'npc' }

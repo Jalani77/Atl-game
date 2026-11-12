@@ -11,13 +11,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const DEV_ORIGINS = [
+  CLIENT_URL,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 const app = express();
 const httpServer = createServer(app);
 
 app.use(cors({
-  origin: IS_PRODUCTION ? true : CLIENT_URL,
+  origin: IS_PRODUCTION ? true : DEV_ORIGINS,
   credentials: true,
 }));
 app.use(express.json());
@@ -33,7 +38,7 @@ app.get('/health', (_req, res) => {
 
 const io = new Server(httpServer, {
   cors: {
-    origin: IS_PRODUCTION ? true : CLIENT_URL,
+    origin: IS_PRODUCTION ? true : DEV_ORIGINS,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -58,7 +63,7 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Campus Rivals server running on port ${PORT}`);
   console.log(`Environment: ${IS_PRODUCTION ? 'production' : 'development'}`);
   gameServer.start();

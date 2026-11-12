@@ -13,6 +13,7 @@ import type {
   RivalryScore,
   SchoolId,
 } from '@campus-rivals/shared';
+import { PLOTS, BUILDINGS, distance2D } from '@campus-rivals/shared';
 
 export class Game {
   private container: HTMLElement;
@@ -49,14 +50,17 @@ export class Game {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 100, 300);
+    this.scene.background = new THREE.Color(0xb7def2);
+    this.scene.fog = new THREE.Fog(0xc5e6f2, 80, 220);
 
     this.camera = new THREE.PerspectiveCamera(
-      60,
+      50,
       container.clientWidth / container.clientHeight,
       0.1,
       500
@@ -68,7 +72,7 @@ export class Game {
     this.world = new WorldRenderer(this.scene);
     this.input = new InputManager(container);
     this.playerController = new PlayerController(this, this.input);
-    this.cameraController = new CameraController(this.camera, this.input);
+    this.cameraController = new CameraController(this.camera, this.input, this.scene);
     this.ui = new UIManager(container, this);
 
     window.addEventListener('resize', this.onResize);
@@ -99,8 +103,13 @@ export class Game {
 
     if (this.gamePhase === 'playing' && this.localPlayer) {
       this.playerController.update(dt);
-      this.cameraController.update(dt, this.localPlayer.position);
-      this.world.updateEntities(dt, this.players, this.npcs, this.banners);
+      const plot = this.localPlayer.plotId ? PLOTS.find((item) => item.id === this.localPlayer?.plotId) : undefined;
+      const focus = this.input.isOverview() && plot ? plot.center : this.localPlayer.position;
+      this.cameraController.update(dt, focus);
+      const viewer = this.localPlayer
+        ? new THREE.Vector3(this.localPlayer.position.x, 0, this.localPlayer.position.z)
+        : undefined;
+      this.world.updateEntities(dt, this.players, this.npcs, this.banners, viewer);
     }
 
     this.ui.update(dt);
@@ -121,6 +130,18 @@ export class Game {
   onSocketConnected(): void {
     this.gamePhase = 'naming';
     this.ui.showNameInput();
+  }
+
+  onConnectionError(message: string): void {
+    if (this.gamePhase === 'connecting' || this.gamePhase === 'naming') {
+      this.ui.showConnectionError(message);
+    }
+  }
+
+  retryConnection(): void {
+    this.gamePhase = 'connecting';
+    this.ui.showConnecting();
+    this.network.connect();
   }
 
   onConnected(playerId: string, sessionToken: string): void {
@@ -217,6 +238,10 @@ export class Game {
     if (playerId === this.localPlayerId && this.localPlayer) {
       this.localPlayer.plotId = plotId;
       this.gamePhase = 'playing';
+      const plot = PLOTS.find((item) => item.id === plotId);
+      if (plot) {
+        this.input.aimAt(plot.center.x - this.localPlayer.position.x, plot.center.z - this.localPlayer.position.z);
+      }
       this.ui.showGameHUD();
     }
   }
@@ -234,14 +259,35 @@ export class Game {
     }
   }
 
-  onCashUpdate(playerId: string, cash: number, income: number): void {
+  onCashUpdate(playerId: string, cash: number, pending: number, rate: number): void {
     const player = this.players.get(playerId);
     if (player) {
       player.cash = cash;
+      player.pendingCash = pending;
     }
     if (playerId === this.localPlayerId) {
-      this.ui.updateCash(cash, income);
+      this.ui.updateCash(cash, pending, rate);
+      if (player?.plotId) this.world.setPending(player.plotId, pending, rate);
     }
+  }
+
+  onProduced(plotId: string, value: number, count: number): void {
+    this.world.showProduction(plotId, value, count);
+  }
+
+  resetCamera(): void {
+    const facing = this.localPlayer?.rotation ?? 0;
+    this.input.resetView(facing);
+  }
+
+  toggleCampusView(): boolean {
+    return this.input.toggleOverview();
+  }
+
+  toggleMute(): boolean {
+    const next = localStorage.getItem('cr-mute') === '1' ? '0' : '1';
+    localStorage.setItem('cr-mute', next);
+    return next === '1';
   }
 
   onSpiritUpdate(playerId: string, spirit: number): void {
@@ -354,7 +400,34 @@ export class Game {
   }
 
   sendAttack(targetId: string, weaponId: string): void {
+    if (this.localPlayerId) this.world.playAttack(this.localPlayerId);
     this.network.send({ type: 'attack', targetId, weaponId });
+  }
+
+  getDashCooldown(): number {
+    return this.playerController.getDashCooldownPercent();
+  }
+
+  setQuality(level: 'low' | 'high'): void {
+    this.world.setQuality(level);
+    this.renderer.shadowMap.enabled = level === 'high';
+    this.renderer.setPixelRatio(level === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
+  }
+
+  nearestPurchase(): { name: string; price: number; distance: number } | null {
+    const player = this.localPlayer;
+    if (!player?.plotId) return null;
+    const campus = this.campuses.get(player.plotId);
+    if (!campus) return null;
+    let best: { name: string; price: number; distance: number } | null = null;
+    for (const pad of campus.purchasePads) {
+      const distance = distance2D(player.position, pad.position);
+      if (!best || distance < best.distance) {
+        const config = BUILDINGS[pad.buildingId];
+        best = { name: config?.name ?? pad.buildingId, price: config?.basePrice ?? 0, distance };
+      }
+    }
+    return best;
   }
 
   sendRespawn(): void {
