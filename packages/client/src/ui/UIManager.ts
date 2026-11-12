@@ -1,6 +1,12 @@
 import type { Game } from '../game/Game';
 import type { SchoolId, CampusState, RivalryScore } from '@campus-rivals/shared';
-import { SCHOOLS, PLOTS, BUILDINGS } from '@campus-rivals/shared';
+import { SCHOOLS, PLOTS } from '@campus-rivals/shared';
+
+const ICONS = {
+  cash: `<svg class="hud-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#f4c15d" stroke="#a87412" stroke-width="2"/><text x="12" y="16" text-anchor="middle" font-size="11" font-family="Inter,sans-serif" fill="#6a4a08" font-weight="700">C</text></svg>`,
+  spirit: `<svg class="hud-icon" viewBox="0 0 24 24" fill="#7d5bd6"><path d="M12 3l2.2 5.6H20l-4.6 3.6 1.8 5.8L12 15.8 6.8 18l1.8-5.8L4 8.6h5.8z"/></svg>`,
+  heart: `<svg class="hud-icon" viewBox="0 0 24 24" fill="#e15b4a"><path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z"/></svg>`,
+};
 
 export class UIManager {
   private container: HTMLElement;
@@ -20,7 +26,38 @@ export class UIManager {
     container.appendChild(this.uiLayer);
   }
 
-  update(dt: number): void {
+  update(_dt: number): void {
+    const objective = document.getElementById('hud-objective');
+    const prompt = document.getElementById('hud-prompt');
+    const dash = document.getElementById('hud-dash') as HTMLElement | null;
+    const weapon = document.getElementById('hud-weapon');
+    const player = this.game.getLocalPlayer();
+    if (!player || !objective) return;
+
+    const campus = player.plotId ? this.game.getCampuses().get(player.plotId) : undefined;
+    const owned = new Set(campus?.buildings.map((building) => building.buildingId) ?? []);
+    if (!owned.has('admissions')) {
+      objective.textContent = 'Open Admissions — step on the station in your courtyard';
+    } else if (!owned.has('classroom')) {
+      objective.textContent = 'Build your first classroom — follow the highlighted station';
+    } else {
+      objective.textContent = 'Expand the campus or head out to meet a rival school';
+    }
+
+    const near = this.game.nearestPurchase();
+    if (prompt) {
+      if (near && near.distance < 4) {
+        prompt.style.display = 'block';
+        prompt.textContent = `Press E to build ${near.name}${near.price > 0 ? ` · ${near.price} cash` : ' · free'}`;
+      } else {
+        prompt.style.display = 'none';
+      }
+    }
+    if (dash) dash.style.width = `${Math.round(this.game.getDashCooldown() * 100)}%`;
+    if (weapon) {
+      const id = player.equippedWeapon;
+      weapon.textContent = id === 'spirit_blaster' ? 'Spirit Blaster' : 'Foam Baton';
+    }
   }
 
   private clearScreen(): void {
@@ -173,63 +210,82 @@ export class UIManager {
     
     const school = player.school ? SCHOOLS[player.school] : null;
 
+    const accent = school?.color ?? '#3aa0e0';
     this.hudElement = this.createScreen(`
       <div id="hud" style="pointer-events:none;">
-        <!-- Top Bar -->
-        <div style="position:absolute;top:1rem;left:50%;transform:translateX(-50%);display:flex;gap:2rem;background:rgba(0,0,0,0.6);padding:0.75rem 2rem;border-radius:12px;">
-          <div style="display:flex;align-items:center;gap:0.5rem;">
-            <span style="color:#f1c40f;">💰</span>
-            <span id="hud-cash" style="color:#fff;font-weight:600;">${player.cash}</span>
-            <span id="hud-income" style="color:#888;font-size:0.8rem;">(+0/s)</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:0.5rem;">
-            <span style="color:#9b59b6;">⭐</span>
-            <span id="hud-spirit" style="color:#fff;font-weight:600;">${player.spirit}</span>
+        <div class="hud-panel" style="position:absolute;top:16px;left:16px;display:flex;gap:12px;align-items:center;padding:10px 14px;pointer-events:auto;">
+          <div style="width:36px;height:36px;border-radius:10px;background:${accent};"></div>
+          <div>
+            <div style="font-weight:800;letter-spacing:.04em;">${school?.shortName ?? 'Campus'}</div>
+            <div style="font-size:12px;color:#667085;">${player.name}</div>
           </div>
         </div>
 
-        <!-- Health Bar -->
-        <div style="position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);width:300px;">
-          <div style="background:rgba(0,0,0,0.6);border-radius:8px;padding:0.5rem;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:0.25rem;">
-              <span style="color:#fff;font-size:0.8rem;">Health</span>
-              <span id="hud-health-text" style="color:#fff;font-size:0.8rem;">${player.health}/${player.maxHealth}</span>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;">
+          <div class="hud-panel" style="display:flex;gap:18px;padding:10px 16px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${ICONS.cash}
+              <strong id="hud-cash">${player.cash}</strong>
+              <span id="hud-income" style="color:#3d7a46;font-size:12px;font-weight:700;">+0 / tick</span>
             </div>
-            <div style="height:12px;background:#333;border-radius:6px;overflow:hidden;">
-              <div id="hud-health-bar" style="height:100%;background:linear-gradient(90deg,#e74c3c,#c0392b);width:100%;transition:width 0.3s;"></div>
+            <div style="width:1px;background:#eadfce;"></div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${ICONS.spirit}
+              <strong id="hud-spirit">${player.spirit}</strong>
             </div>
           </div>
+          <div id="hud-objective" class="hud-objective">Open Admissions — step on the station in your courtyard</div>
         </div>
 
-        <!-- School Badge -->
-        ${school ? `
-        <div style="position:absolute;top:1rem;left:1rem;display:flex;align-items:center;gap:0.75rem;background:rgba(0,0,0,0.6);padding:0.5rem 1rem;border-radius:8px;">
-          <div style="width:30px;height:30px;background:${school.color};border-radius:50%;"></div>
-          <span style="color:#fff;font-weight:500;">${school.shortName}</span>
-        </div>
-        ` : ''}
-
-        <!-- Controls Help -->
-        <div style="position:absolute;bottom:1rem;left:1rem;background:rgba(0,0,0,0.6);padding:0.75rem;border-radius:8px;font-size:0.75rem;color:#888;">
-          <div>WASD - Move</div>
-          <div>Mouse - Look</div>
-          <div>LMB - Attack</div>
-          <div>Space - Dash</div>
-          <div>E/F - Interact</div>
+        <div class="hud-panel" style="position:absolute;top:16px;right:16px;display:flex;gap:8px;padding:8px;pointer-events:auto;">
+          <button id="quality-btn" style="border:0;background:#243044;color:white;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;">Shadows</button>
+          <span id="connection-dot" title="Connected" style="width:12px;height:12px;border-radius:50%;background:#3dba6c;align-self:center;margin:0 6px;"></span>
         </div>
 
-        <!-- Error Toast -->
-        <div id="error-toast" style="position:absolute;top:5rem;left:50%;transform:translateX(-50%);background:#e74c3c;color:#fff;padding:1rem 2rem;border-radius:8px;display:none;"></div>
+        <div id="hud-prompt" class="hud-panel" style="display:none;position:absolute;left:50%;bottom:108px;transform:translateX(-50%);padding:10px 14px;font-weight:700;"></div>
+
+        <div class="hud-panel" style="position:absolute;left:50%;bottom:18px;transform:translateX(-50%);width:min(420px,92vw);padding:10px 14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="display:flex;gap:6px;align-items:center;font-weight:700;">${ICONS.heart} Health</span>
+            <span id="hud-health-text">${player.health}/${player.maxHealth}</span>
+          </div>
+          <div style="height:12px;background:#efe6da;border-radius:99px;overflow:hidden;">
+            <div id="hud-health-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#ef7a67,#e24b3c);"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;font-weight:700;color:#526073;">
+            <span id="hud-weapon">Foam Baton</span>
+            <span>Dash</span>
+          </div>
+          <div style="height:6px;background:#efe6da;border-radius:99px;overflow:hidden;margin-top:4px;">
+            <div id="hud-dash" style="height:100%;width:100%;background:${accent};"></div>
+          </div>
+        </div>
+
+        <details id="help-panel" class="hud-panel" style="position:absolute;left:16px;bottom:16px;padding:10px 12px;width:210px;pointer-events:auto;">
+          <summary>Controls</summary>
+          <div style="margin-top:8px;font-size:13px;line-height:1.55;color:#3c4a5d;">
+            WASD move<br>Right-drag look<br>Click attack<br>Space dash<br>E buy building
+          </div>
+        </details>
+
+        <div id="error-toast" style="position:absolute;top:92px;left:50%;transform:translateX(-50%);background:#e15b4a;color:#fff;padding:0.8rem 1.2rem;border-radius:12px;display:none;font-weight:700;"></div>
       </div>
     `);
+    this.hudElement.style.pointerEvents = 'none';
     this.uiLayer.appendChild(this.hudElement);
+    const quality = this.hudElement.querySelector('#quality-btn');
+    quality?.addEventListener('click', () => {
+      const next = quality.textContent === 'Shadows' ? 'low' : 'high';
+      this.game.setQuality(next);
+      quality.textContent = next === 'low' ? 'Flat' : 'Shadows';
+    });
   }
 
   updateCash(cash: number, income: number): void {
     const cashEl = document.getElementById('hud-cash');
     const incomeEl = document.getElementById('hud-income');
     if (cashEl) cashEl.textContent = String(cash);
-    if (incomeEl) incomeEl.textContent = `(+${income}/s)`;
+    if (incomeEl) incomeEl.textContent = `+${income} / tick`;
   }
 
   updateSpirit(spirit: number): void {

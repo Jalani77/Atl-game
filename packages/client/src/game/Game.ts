@@ -13,6 +13,7 @@ import type {
   RivalryScore,
   SchoolId,
 } from '@campus-rivals/shared';
+import { PLOTS, BUILDINGS, distance2D } from '@campus-rivals/shared';
 
 export class Game {
   private container: HTMLElement;
@@ -49,14 +50,17 @@ export class Game {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 100, 300);
+    this.scene.background = new THREE.Color(0xb7def2);
+    this.scene.fog = new THREE.Fog(0xc5e6f2, 80, 220);
 
     this.camera = new THREE.PerspectiveCamera(
-      60,
+      50,
       container.clientWidth / container.clientHeight,
       0.1,
       500
@@ -68,7 +72,7 @@ export class Game {
     this.world = new WorldRenderer(this.scene);
     this.input = new InputManager(container);
     this.playerController = new PlayerController(this, this.input);
-    this.cameraController = new CameraController(this.camera, this.input);
+    this.cameraController = new CameraController(this.camera, this.input, this.scene);
     this.ui = new UIManager(container, this);
 
     window.addEventListener('resize', this.onResize);
@@ -217,6 +221,10 @@ export class Game {
     if (playerId === this.localPlayerId && this.localPlayer) {
       this.localPlayer.plotId = plotId;
       this.gamePhase = 'playing';
+      const plot = PLOTS.find((item) => item.id === plotId);
+      if (plot) {
+        this.input.aimAt(plot.center.x - this.localPlayer.position.x, plot.center.z - this.localPlayer.position.z);
+      }
       this.ui.showGameHUD();
     }
   }
@@ -354,7 +362,34 @@ export class Game {
   }
 
   sendAttack(targetId: string, weaponId: string): void {
+    if (this.localPlayerId) this.world.playAttack(this.localPlayerId);
     this.network.send({ type: 'attack', targetId, weaponId });
+  }
+
+  getDashCooldown(): number {
+    return this.playerController.getDashCooldownPercent();
+  }
+
+  setQuality(level: 'low' | 'high'): void {
+    this.world.setQuality(level);
+    this.renderer.shadowMap.enabled = level === 'high';
+    this.renderer.setPixelRatio(level === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
+  }
+
+  nearestPurchase(): { name: string; price: number; distance: number } | null {
+    const player = this.localPlayer;
+    if (!player?.plotId) return null;
+    const campus = this.campuses.get(player.plotId);
+    if (!campus) return null;
+    let best: { name: string; price: number; distance: number } | null = null;
+    for (const pad of campus.purchasePads) {
+      const distance = distance2D(player.position, pad.position);
+      if (!best || distance < best.distance) {
+        const config = BUILDINGS[pad.buildingId];
+        best = { name: config?.name ?? pad.buildingId, price: config?.basePrice ?? 0, distance };
+      }
+    }
+    return best;
   }
 
   sendRespawn(): void {

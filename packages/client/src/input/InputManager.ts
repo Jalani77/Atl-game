@@ -37,8 +37,8 @@ export class InputManager {
   };
 
   private cameraYaw = 0;
-  private cameraPitch = 0.5;
-  private cameraDistance = 20;
+  private cameraPitch = 0.42;
+  private cameraDistance = 12;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -106,7 +106,7 @@ export class InputManager {
   };
 
   private onWheel = (e: WheelEvent): void => {
-    this.cameraDistance = Math.max(5, Math.min(50, this.cameraDistance + e.deltaY * 0.02));
+    this.cameraDistance = Math.max(6, Math.min(24, this.cameraDistance + e.deltaY * 0.01));
   };
 
   private onTouchStart = (e: TouchEvent): void => {
@@ -141,26 +141,30 @@ export class InputManager {
   };
 
   update(): void {
-    let moveX = 0;
-    let moveZ = 0;
+    let strafe = 0;
+    let forward = 0;
 
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) moveZ -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) moveZ += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) moveX -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) moveX += 1;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forward += 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forward -= 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) strafe -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) strafe += 1;
 
     if (this.touchJoystick.active) {
       const dx = this.touchJoystick.currentX - this.touchJoystick.startX;
       const dy = this.touchJoystick.currentY - this.touchJoystick.startY;
       const maxDist = 50;
-      moveX = Math.max(-1, Math.min(1, dx / maxDist));
-      moveZ = Math.max(-1, Math.min(1, dy / maxDist));
+      strafe = Math.max(-1, Math.min(1, dx / maxDist));
+      forward = Math.max(-1, Math.min(1, -dy / maxDist));
     }
 
-    const cos = Math.cos(this.cameraYaw);
     const sin = Math.sin(this.cameraYaw);
-    this.state.moveX = moveX * cos - moveZ * sin;
-    this.state.moveZ = moveX * sin + moveZ * cos;
+    const cos = Math.cos(this.cameraYaw);
+    const forwardX = -sin;
+    const forwardZ = -cos;
+    const rightX = cos;
+    const rightZ = -sin;
+    this.state.moveX = rightX * strafe + forwardX * forward;
+    this.state.moveZ = rightZ * strafe + forwardZ * forward;
 
     if (Math.abs(this.state.moveX) > 0.01 || Math.abs(this.state.moveZ) > 0.01) {
       this.state.rotation = Math.atan2(this.state.moveX, this.state.moveZ);
@@ -205,6 +209,12 @@ export class InputManager {
 
   getCameraDistance(): number {
     return this.cameraDistance;
+  }
+
+  aimAt(dx: number, dz: number): void {
+    this.cameraYaw = Math.atan2(-dx, -dz);
+    this.cameraPitch = 0.4;
+    this.cameraDistance = 12;
   }
 
   dispose(): void {
