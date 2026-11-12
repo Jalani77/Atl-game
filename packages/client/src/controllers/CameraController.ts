@@ -46,6 +46,7 @@ export class CameraController {
 
     const t = 1 - Math.exp(-this.smoothness * dt);
     this.currentPosition.lerp(this.targetPosition, t);
+    this.currentPosition.y = Math.max(1.25, this.currentPosition.y);
     this.lookAt.lerp(focus, t);
     this.camera.position.copy(this.currentPosition);
     this.camera.lookAt(this.lookAt);

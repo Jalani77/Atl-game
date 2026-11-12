@@ -6,10 +6,11 @@ import type {
   CampusState,
   SchoolId,
 } from '@campus-rivals/shared';
-import { SCHOOLS, BUILDINGS, PLOTS } from '@campus-rivals/shared';
+import { SCHOOLS, BUILDINGS, PLOTS, collectionPosition, gradeForValue } from '@campus-rivals/shared';
 import { createCharacter, animateCharacter } from './character';
 import { createCampusBuilding } from './buildings';
 import { buildCampusEnvironment, updateWalkers, type AmbientWalker } from './environment';
+import { updateCity } from './city';
 import { PALETTES, labelTexture, mat } from './materials';
 
 export class WorldRenderer {
@@ -19,6 +20,8 @@ export class WorldRenderer {
   private bannerMeshes = new Map<SchoolId, THREE.Group>();
   private buildingMeshes = new Map<string, THREE.Group>();
   private purchasePadMeshes = new Map<string, THREE.Group>();
+  private terminals = new Map<string, THREE.Sprite>();
+  private papers: { mesh: THREE.Mesh; t: number; from: THREE.Vector3; to: THREE.Vector3 }[] = [];
   private damageTexts: { mesh: THREE.Object3D; endTime: number }[] = [];
   private lastPositions = new Map<string, THREE.Vector3>();
   private walkers: AmbientWalker[] = [];
@@ -91,6 +94,7 @@ export class WorldRenderer {
     }
 
     for (const campus of campuses.values()) {
+      this.ensureTerminal(campus);
       for (const pad of campus.purchasePads) {
         if (this.purchasePadMeshes.has(pad.id)) continue;
         const station = this.createPurchaseStation(pad.buildingId, campus.school, pad.isActive);
@@ -126,13 +130,72 @@ export class WorldRenderer {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: labelTexture(config?.name ?? buildingId, active ? affordable : 'LOCKED', css(palette.accent)),
       transparent: true,
+      depthTest: false,
     }));
-    sprite.position.y = 2.5;
-    sprite.scale.set(3.1, 1.55, 1);
+    sprite.position.y = 1.7;
+    sprite.scale.set(1.7, 0.85, 1);
+    sprite.userData.label = true;
     group.add(sprite);
     group.userData.preview = preview;
     group.userData.baseY = 0.9;
     return group;
+  }
+
+  private ensureTerminal(campus: CampusState): void {
+    if (this.terminals.has(campus.plotId)) return;
+    const spot = collectionPosition(campus.plotId);
+    const palette = PALETTES[campus.school];
+    const desk = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.1, 0.8), mat(palette.wall));
+    body.position.y = 0.55;
+    body.castShadow = true;
+    body.userData.occlude = true;
+    desk.add(body);
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.06), mat(0x17324d, { emissive: 0x17324d }));
+    screen.position.set(0, 1.25, 0.34);
+    desk.add(screen);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: labelTexture('Collect', '0 pending', css(palette.accent)),
+      transparent: true,
+    }));
+    sprite.position.y = 2.15;
+    sprite.scale.set(1.6, 0.8, 1);
+    desk.add(sprite);
+    desk.position.set(spot.x, 0, spot.z);
+    this.scene.add(desk);
+    this.terminals.set(campus.plotId, sprite);
+  }
+
+  setPending(plotId: string, pending: number, rate: number): void {
+    const sprite = this.terminals.get(plotId);
+    if (!sprite) return;
+    const material = sprite.material as THREE.SpriteMaterial;
+    material.map?.dispose();
+    material.map = labelTexture('Collect', `${pending} pending`, '#3d7a46');
+    material.needsUpdate = true;
+    sprite.userData.rate = rate;
+  }
+
+  showProduction(plotId: string, value: number, count: number): void {
+    const plot = PLOTS.find((item) => item.id === plotId);
+    if (!plot || this.papers.length > 18) return;
+    const spot = collectionPosition(plotId);
+    const papers = Math.min(3, count);
+    for (let i = 0; i < papers; i++) {
+      if (this.papers.length > 18) break;
+      const sheet = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.05, 0.3),
+        mat(0xf7f1e4, { roughness: 0.8 }),
+      );
+      const stamp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.12), mat(gradeForValue(value) === 'A' ? 0x3dba6c : 0xf0b429));
+      stamp.position.y = 0.04;
+      sheet.add(stamp);
+      const from = new THREE.Vector3(plot.center.x - 2 + i * 0.4, 1.05, plot.center.z);
+      const to = new THREE.Vector3(spot.x, 1.15, spot.z);
+      sheet.position.copy(from);
+      this.scene.add(sheet);
+      this.papers.push({ mesh: sheet, t: -i * 0.15, from, to });
+    }
   }
 
   private buildBanners(): void {
@@ -222,6 +285,7 @@ export class WorldRenderer {
     players: Map<string, PlayerState>,
     npcs: Map<string, NPCState>,
     banners: Map<SchoolId, BannerState>,
+    viewer?: THREE.Vector3,
   ): void {
     const now = performance.now();
     for (const player of players.values()) {
@@ -269,6 +333,27 @@ export class WorldRenderer {
         preview.rotation.y += dt;
         preview.position.y = 0.9 + Math.sin(now / 450) * 0.08;
       }
+      const label = station.children.find((child) => child.userData.label) as THREE.Sprite | undefined;
+      if (label && viewer) {
+        const distance = viewer.distanceTo(station.position);
+        label.visible = distance < 16;
+        const near = distance < 7;
+        label.scale.set(near ? 1.7 : 1.05, near ? 0.85 : 0.5, 1);
+        (label.material as THREE.SpriteMaterial).opacity = near ? 1 : 0.55;
+      }
+    }
+
+    for (let i = this.papers.length - 1; i >= 0; i--) {
+      const paper = this.papers[i];
+      paper.t += dt * 0.45;
+      if (paper.t >= 1) {
+        this.scene.remove(paper.mesh);
+        this.papers.splice(i, 1);
+        continue;
+      }
+      const t = Math.max(0, paper.t);
+      paper.mesh.position.lerpVectors(paper.from, paper.to, t);
+      paper.mesh.position.y += Math.sin(t * Math.PI) * 0.35;
     }
 
     for (const building of this.buildingMeshes.values()) {
@@ -287,6 +372,7 @@ export class WorldRenderer {
     });
 
     updateWalkers(this.walkers, dt, now);
+    updateCity(this.scene, dt);
     this.updateDamageTexts();
   }
 
@@ -325,6 +411,7 @@ function css(color: number): string {
 class PurchaseChime {
   private ctx?: AudioContext;
   play(): void {
+    if (localStorage.getItem('cr-mute') === '1') return;
     const AudioCtx = window.AudioContext;
     if (!AudioCtx) return;
     this.ctx ??= new AudioCtx();

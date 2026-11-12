@@ -37,18 +37,18 @@ export class UIManager {
     const campus = player.plotId ? this.game.getCampuses().get(player.plotId) : undefined;
     const owned = new Set(campus?.buildings.map((building) => building.buildingId) ?? []);
     if (!owned.has('admissions')) {
-      objective.textContent = 'Open Admissions — step on the station in your courtyard';
+      objective.textContent = 'Walk onto the pad to open Admissions';
     } else if (!owned.has('classroom')) {
-      objective.textContent = 'Build your first classroom — follow the highlighted station';
+      objective.textContent = 'Walk onto the classroom pad. Then collect pending cash at the terminal';
     } else {
-      objective.textContent = 'Expand the campus or head out to meet a rival school';
+      objective.textContent = 'Students make assignments. Walk onto the collection desk to bank them';
     }
 
     const near = this.game.nearestPurchase();
     if (prompt) {
       if (near && near.distance < 4) {
         prompt.style.display = 'block';
-        prompt.textContent = `Press E to build ${near.name}${near.price > 0 ? ` · ${near.price} cash` : ' · free'}`;
+        prompt.textContent = `Stand on the pad · ${near.name}${near.price > 0 ? ` · ${near.price} cash` : ' · free'}`;
       } else {
         prompt.style.display = 'none';
       }
@@ -245,7 +245,8 @@ export class UIManager {
             <div style="display:flex;align-items:center;gap:8px;">
               ${ICONS.cash}
               <strong id="hud-cash">${player.cash}</strong>
-              <span id="hud-income" style="color:#3d7a46;font-size:12px;font-weight:700;">+0 / tick</span>
+              <span id="hud-pending" style="color:#8a5a12;font-size:12px;font-weight:700;">0 pending</span>
+              <span id="hud-income" style="color:#3d7a46;font-size:12px;font-weight:700;">est. 0/s</span>
             </div>
             <div style="width:1px;background:#eadfce;"></div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -257,6 +258,9 @@ export class UIManager {
         </div>
 
         <div class="hud-panel" style="position:absolute;top:16px;right:16px;display:flex;gap:8px;padding:8px;pointer-events:auto;">
+          <button id="reset-cam" style="border:0;background:#243044;color:white;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;">Reset camera</button>
+          <button id="campus-view" style="border:0;background:#243044;color:white;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;">Campus view</button>
+          <button id="mute-btn" style="border:0;background:#243044;color:white;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;">${localStorage.getItem('cr-mute') === '1' ? 'Muted' : 'Sound'}</button>
           <button id="quality-btn" style="border:0;background:#243044;color:white;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer;">Shadows</button>
           <span id="connection-dot" title="Connected" style="width:12px;height:12px;border-radius:50%;background:#3dba6c;align-self:center;margin:0 6px;"></span>
         </div>
@@ -283,7 +287,7 @@ export class UIManager {
         <details id="help-panel" class="hud-panel" style="position:absolute;left:16px;bottom:16px;padding:10px 12px;width:210px;pointer-events:auto;">
           <summary>Controls</summary>
           <div style="margin-top:8px;font-size:13px;line-height:1.55;color:#3c4a5d;">
-            WASD move<br>Right-drag look<br>Click attack<br>Space dash<br>E buy building
+            1. Walk onto a pad to buy<br>2. Students produce assignments<br>3. Assignments become pending cash<br>4. Walk onto the collection desk<br>5. Right-drag to orbit, scroll or pinch to zoom<br>WASD move · click attack · space dash · E is an extra buy key
           </div>
         </details>
 
@@ -298,13 +302,26 @@ export class UIManager {
       this.game.setQuality(next);
       quality.textContent = next === 'low' ? 'Flat' : 'Shadows';
     });
+    this.hudElement.querySelector('#reset-cam')?.addEventListener('click', () => this.game.resetCamera());
+    const campusView = this.hudElement.querySelector('#campus-view');
+    campusView?.addEventListener('click', () => {
+      const on = this.game.toggleCampusView();
+      campusView.textContent = on ? 'Play view' : 'Campus view';
+    });
+    const mute = this.hudElement.querySelector('#mute-btn');
+    mute?.addEventListener('click', () => {
+      const muted = this.game.toggleMute();
+      mute.textContent = muted ? 'Muted' : 'Sound';
+    });
   }
 
-  updateCash(cash: number, income: number): void {
+  updateCash(cash: number, pending: number, rate: number): void {
     const cashEl = document.getElementById('hud-cash');
+    const pendingEl = document.getElementById('hud-pending');
     const incomeEl = document.getElementById('hud-income');
     if (cashEl) cashEl.textContent = String(cash);
-    if (incomeEl) incomeEl.textContent = `+${income} / tick`;
+    if (pendingEl) pendingEl.textContent = `${pending} pending`;
+    if (incomeEl) incomeEl.textContent = `est. ${rate.toFixed(1)}/s`;
   }
 
   updateSpirit(spirit: number): void {

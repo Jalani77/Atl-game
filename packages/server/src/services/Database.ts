@@ -41,6 +41,13 @@ export class Database {
       );
       
       CREATE INDEX IF NOT EXISTS idx_session_token ON players(session_token);
+    `);
+    try {
+      this.db.exec('ALTER TABLE players ADD COLUMN pending_cash INTEGER DEFAULT 0');
+    } catch {
+      // Column already exists on databases created after this migration.
+    }
+    this.db.exec(`
       
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -71,6 +78,7 @@ export class Database {
       name,
       school: null as any,
       cash: 100,
+      pendingCash: 0,
       spirit: 0,
       buildings: [],
       decorations: [],
@@ -109,6 +117,7 @@ export class Database {
       name: row.name,
       school: row.school,
       cash: row.cash,
+      pendingCash: row.pending_cash ?? 0,
       spirit: row.spirit,
       buildings: JSON.parse(row.buildings) as SavedBuilding[],
       decorations: JSON.parse(row.decorations) as SavedDecoration[],
@@ -153,6 +162,11 @@ export class Database {
   updatePlayerCash(playerId: string, cash: number): void {
     this.db.prepare('UPDATE players SET cash = ?, updated_at = ? WHERE id = ?')
       .run(cash, Date.now(), playerId);
+  }
+
+  updatePlayerFunds(playerId: string, cash: number, pendingCash: number): void {
+    this.db.prepare('UPDATE players SET cash = ?, pending_cash = ?, updated_at = ? WHERE id = ?')
+      .run(cash, pendingCash, Date.now(), playerId);
   }
 
   updatePlayerSpirit(playerId: string, spirit: number): void {

@@ -22,7 +22,6 @@ import type {
   PROTECTED_AREAS,
   BANNER_RETURN_LOCATIONS,
   STARTING_CASH,
-  INCOME_INTERVAL_MS,
   PLAYER_MAX_HEALTH,
   RESPAWN_TIME_MS,
   SPAWN_PROTECTION_MS,
@@ -36,13 +35,18 @@ import {
   PROTECTED_AREAS as ProtectedAreasConfig,
   BANNER_RETURN_LOCATIONS as BannerReturnConfig,
   STARTING_CASH as StartingCash,
-  INCOME_INTERVAL_MS as IncomeInterval,
   PLAYER_MAX_HEALTH as MaxHealth,
   RESPAWN_TIME_MS as RespawnTime,
   SPAWN_PROTECTION_MS as SpawnProtection,
   SCHOOL_IDS,
   GRID_SIZE,
   distance2D,
+  classroomOutput,
+  collectionPosition,
+  collectPending,
+  canCollect,
+  evaluateWalkPurchase,
+  gradeForValue,
   pointInCircle,
   pointInRect,
   generateId,
@@ -85,6 +89,8 @@ export class GameServer {
   private lastTickTime = Date.now();
   private inputSequences = new Map<string, number>();
   private rewardCooldowns = new Map<string, Map<string, number>>();
+  private padContact = new Map<string, { padId: string; since: number }>();
+  private purchaseLockUntil = new Map<string, number>();
 
   constructor(io: Server, db: Database) {
     this.io = io;
@@ -206,6 +212,7 @@ export class GameServer {
       health: MaxHealth,
       maxHealth: MaxHealth,
       cash: saveData.cash,
+      pendingCash: saveData.pendingCash ?? 0,
       spirit: saveData.spirit,
       isAlive: true,
       spawnProtectionUntil: Date.now() + SpawnProtection,
@@ -381,7 +388,13 @@ export class GameServer {
     if (!player || !player.plotId) return;
     
     const campus = this.campuses.get(player.plotId);
-    if (!campus) return;
+    if (!campus || campus.ownerId !== playerId) return;
+
+    const pad = campus.purchasePads.find((item) => item.id === padId && item.buildingId === buildingId);
+    if (!pad || distance2D(player.position, pad.position) > 2.2) {
+      this.send(socket, { type: 'error', code: 'TOO_FAR', message: 'Stand on your purchase pad' });
+      return;
+    }
     
     const result = this.economyService.purchaseBuilding(player, campus, buildingId, padId);
     if (!result.success) {
@@ -395,7 +408,7 @@ export class GameServer {
       pads: result.pads!,
     });
     
-    this.send(socket, { type: 'cashUpdate', playerId, cash: player.cash, income: campus.totalIncome });
+    this.sendEconomy(player, campus);
   }
 
   private handlePlaceBuilding(
@@ -607,7 +620,7 @@ export class GameServer {
   start(): void {
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
     this.snapshotInterval = setInterval(() => this.sendSnapshots(), SNAPSHOT_MS);
-    this.incomeInterval = setInterval(() => this.processIncome(), IncomeInterval);
+    this.incomeInterval = setInterval(() => this.processProduction(), 2500);
     console.log('Game server started');
   }
 
@@ -617,6 +630,7 @@ export class GameServer {
     this.lastTickTime = now;
     
     this.npcService.update(dt);
+    this.updateWalkOverEconomy();
     
     for (const [school, banner] of this.banners) {
       if (!banner.isAtBase && !banner.carrierId) {
@@ -652,29 +666,108 @@ export class GameServer {
     }
   }
 
-  private processIncome(): void {
+  private processProduction(): void {
     for (const player of this.players.values()) {
-      if (!player.plotId) continue;
-      
+      if (!player.plotId || !this.playerToSocket.has(player.id)) continue;
       const campus = this.campuses.get(player.plotId);
-      if (!campus || campus.totalIncome <= 0) continue;
-      
-      player.cash += campus.totalIncome;
-      this.db.updatePlayerCash(player.id, player.cash);
-      
-      const socketId = this.playerToSocket.get(player.id);
-      if (socketId) {
-        const socket = this.io.sockets.sockets.get(socketId);
-        if (socket) {
-          this.send(socket, {
-            type: 'cashUpdate',
-            playerId: player.id,
-            cash: player.cash,
-            income: campus.totalIncome,
-          });
+      if (!campus || campus.ownerId !== player.id) continue;
+      const classroom = campus.buildings.find((building) => building.buildingId === 'classroom');
+      if (!classroom) continue;
+      const output = classroomOutput(classroom.level);
+      const gained = output.papers * output.valueEach;
+      player.pendingCash += gained;
+      this.db.updatePlayerFunds(player.id, player.cash, player.pendingCash);
+      this.sendEconomy(player, campus);
+      this.broadcast({
+        type: 'produced',
+        plotId: campus.plotId,
+        value: output.valueEach,
+        count: output.papers,
+        grade: gradeForValue(output.valueEach),
+      });
+    }
+  }
+
+  private updateWalkOverEconomy(): void {
+    const now = Date.now();
+    for (const player of this.players.values()) {
+      if (!player.plotId || !player.isAlive || !this.playerToSocket.has(player.id)) continue;
+      const campus = this.campuses.get(player.plotId);
+      if (!campus || campus.ownerId !== player.id) continue;
+
+      const terminal = collectionPosition(player.plotId);
+      if (canCollect(campus.ownerId, player.id, distance2D(player.position, terminal), player.pendingCash)) {
+        const collected = collectPending(player.cash, player.pendingCash);
+        player.cash = collected.wallet;
+        player.pendingCash = collected.pending;
+        this.db.updatePlayerFunds(player.id, player.cash, player.pendingCash);
+        this.sendEconomy(player, campus);
+      }
+
+      let standing: string | null = null;
+      for (const pad of campus.purchasePads) {
+        if (distance2D(player.position, pad.position) < 1.6) {
+          standing = pad.id;
+          break;
         }
       }
+      if (!standing) {
+        this.padContact.delete(player.id);
+        continue;
+      }
+      const contact = this.padContact.get(player.id);
+      if (!contact || contact.padId !== standing) {
+        this.padContact.set(player.id, { padId: standing, since: now });
+        continue;
+      }
+      const pad = campus.purchasePads.find((item) => item.id === standing);
+      if (!pad) continue;
+      const price = BuildingsConfig[pad.buildingId]?.basePrice ?? 0;
+      const decision = evaluateWalkPurchase({
+        ownerId: campus.ownerId,
+        playerId: player.id,
+        distance: distance2D(player.position, pad.position),
+        cash: player.cash,
+        price,
+        dwellMs: now - contact.since,
+        locked: now < (this.purchaseLockUntil.get(player.id) ?? 0),
+      });
+      if (decision === 'wait') continue;
+      if (decision === 'reject') {
+        this.purchaseLockUntil.set(player.id, now + 2000);
+        this.padContact.delete(player.id);
+        const socketId = this.playerToSocket.get(player.id);
+        const socket = socketId ? this.io.sockets.sockets.get(socketId) : undefined;
+        if (socket) this.send(socket, { type: 'error', code: 'PURCHASE_FAILED', message: 'Not enough Campus Cash' });
+        continue;
+      }
+      const result = this.economyService.purchaseBuilding(player, campus, pad.buildingId, pad.id);
+      this.purchaseLockUntil.set(player.id, now + (result.success ? 1200 : 2000));
+      this.padContact.delete(player.id);
+      const socketId = this.playerToSocket.get(player.id);
+      const socket = socketId ? this.io.sockets.sockets.get(socketId) : undefined;
+      if (!result.success) {
+        if (socket) this.send(socket, { type: 'error', code: 'PURCHASE_FAILED', message: result.error || 'Purchase failed' });
+        continue;
+      }
+      this.broadcast({ type: 'buildingPurchased', building: result.building!, pads: result.pads! });
+      this.sendEconomy(player, campus);
     }
+  }
+
+  private sendEconomy(player: PlayerState, campus: CampusState): void {
+    const classroom = campus.buildings.find((building) => building.buildingId === 'classroom');
+    const rate = classroom ? classroomOutput(classroom.level).perSecond : 0;
+    const socketId = this.playerToSocket.get(player.id);
+    const socket = socketId ? this.io.sockets.sockets.get(socketId) : undefined;
+    if (!socket) return;
+    this.send(socket, {
+      type: 'cashUpdate',
+      playerId: player.id,
+      cash: player.cash,
+      pending: player.pendingCash,
+      rate,
+    });
   }
 
   private getGameSnapshot(): GameSnapshot {

@@ -2,6 +2,7 @@ export * from './config/schools';
 export * from './config/buildings';
 export * from './config/weapons';
 export * from './config/world';
+export * from './config/production';
 export * from './types/player';
 export * from './types/messages';
 export * from './types/campus';

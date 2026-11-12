@@ -3,6 +3,7 @@ import { DISTRICTS, PLOTS, PROTECTED_AREAS, SCHOOLS, type PlotConfig, type Schoo
 import { PALETTES, addBox, labelTexture, mat } from './materials';
 import { createCharacter, animateCharacter } from './character';
 import { createStarterKiosk } from './buildings';
+import { addCityDistrict } from './city';
 
 export interface AmbientWalker {
   mesh: THREE.Group;
@@ -15,6 +16,7 @@ export function buildCampusEnvironment(scene: THREE.Scene): AmbientWalker[] {
   addGround(scene);
   addRoads(scene);
   addPlaza(scene);
+  addCityDistrict(scene);
   addHorizon(scene);
   for (const plot of PLOTS) dressPlot(scene, plot, walkers);
   for (const school of Object.keys(DISTRICTS) as SchoolId[]) addDistrictLandmark(scene, school);

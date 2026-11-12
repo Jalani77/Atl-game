@@ -68,7 +68,10 @@ export class NetworkManager {
         this.game.onBuildingPurchased(msg.building, msg.pads);
         break;
       case 'cashUpdate':
-        this.game.onCashUpdate(msg.playerId, msg.cash, msg.income);
+        this.game.onCashUpdate(msg.playerId, msg.cash, msg.pending, msg.rate);
+        break;
+      case 'produced':
+        this.game.onProduced(msg.plotId, msg.value, msg.count);
         break;
       case 'spiritUpdate':
         this.game.onSpiritUpdate(msg.playerId, msg.spirit);

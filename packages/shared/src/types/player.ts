@@ -12,6 +12,7 @@ export interface PlayerState {
   health: number;
   maxHealth: number;
   cash: number;
+  pendingCash: number;
   spirit: number;
   isAlive: boolean;
   spawnProtectionUntil: number;
@@ -37,6 +38,7 @@ export interface PlayerSaveData {
   name: string;
   school: SchoolId;
   cash: number;
+  pendingCash: number;
   spirit: number;
   buildings: SavedBuilding[];
   decorations: SavedDecoration[];

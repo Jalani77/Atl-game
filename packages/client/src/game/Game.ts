@@ -103,8 +103,13 @@ export class Game {
 
     if (this.gamePhase === 'playing' && this.localPlayer) {
       this.playerController.update(dt);
-      this.cameraController.update(dt, this.localPlayer.position);
-      this.world.updateEntities(dt, this.players, this.npcs, this.banners);
+      const plot = this.localPlayer.plotId ? PLOTS.find((item) => item.id === this.localPlayer?.plotId) : undefined;
+      const focus = this.input.isOverview() && plot ? plot.center : this.localPlayer.position;
+      this.cameraController.update(dt, focus);
+      const viewer = this.localPlayer
+        ? new THREE.Vector3(this.localPlayer.position.x, 0, this.localPlayer.position.z)
+        : undefined;
+      this.world.updateEntities(dt, this.players, this.npcs, this.banners, viewer);
     }
 
     this.ui.update(dt);
@@ -254,14 +259,35 @@ export class Game {
     }
   }
 
-  onCashUpdate(playerId: string, cash: number, income: number): void {
+  onCashUpdate(playerId: string, cash: number, pending: number, rate: number): void {
     const player = this.players.get(playerId);
     if (player) {
       player.cash = cash;
+      player.pendingCash = pending;
     }
     if (playerId === this.localPlayerId) {
-      this.ui.updateCash(cash, income);
+      this.ui.updateCash(cash, pending, rate);
+      if (player?.plotId) this.world.setPending(player.plotId, pending, rate);
     }
+  }
+
+  onProduced(plotId: string, value: number, count: number): void {
+    this.world.showProduction(plotId, value, count);
+  }
+
+  resetCamera(): void {
+    const facing = this.localPlayer?.rotation ?? 0;
+    this.input.resetView(facing);
+  }
+
+  toggleCampusView(): boolean {
+    return this.input.toggleOverview();
+  }
+
+  toggleMute(): boolean {
+    const next = localStorage.getItem('cr-mute') === '1' ? '0' : '1';
+    localStorage.setItem('cr-mute', next);
+    return next === '1';
   }
 
   onSpiritUpdate(playerId: string, spirit: number): void {

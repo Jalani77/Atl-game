@@ -39,6 +39,10 @@ export class InputManager {
   private cameraYaw = 0;
   private cameraPitch = 0.42;
   private cameraDistance = 12;
+  private overview = false;
+  private savedView = { pitch: 0.42, distance: 12 };
+  private lookTouch: { id: number; x: number; y: number; moved: boolean } | null = null;
+  private pinchDistance: number | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -51,8 +55,10 @@ export class InputManager {
     this.container.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('mousemove', this.onMouseMove);
-    this.container.addEventListener('wheel', this.onWheel);
-    this.container.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.container.addEventListener('wheel', this.onWheel, { passive: false });
+    this.container.addEventListener('contextmenu', (e) => {
+      if (e.target instanceof HTMLCanvasElement) e.preventDefault();
+    });
 
     this.container.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.container.addEventListener('touchmove', this.onTouchMove, { passive: false });
@@ -78,55 +84,83 @@ export class InputManager {
     this.keys.delete(e.code);
   };
 
+  private isUi(target: EventTarget | null): boolean {
+    return target instanceof Element && !!target.closest('button, input, textarea, details, .hud-panel, .screen');
+  }
+
   private onMouseDown = (e: MouseEvent): void => {
+    if (this.isUi(e.target)) return;
     this.mouseButtons.add(e.button);
-    if (e.button === 0) {
+    if (e.button === 0 && e.target instanceof HTMLCanvasElement) {
       this.state.attack = true;
-    }
-    if (e.button === 2) {
-      this.container.requestPointerLock?.();
     }
   };
 
   private onMouseUp = (e: MouseEvent): void => {
     this.mouseButtons.delete(e.button);
-    if (e.button === 2) {
-      document.exitPointerLock?.();
-    }
   };
 
   private onMouseMove = (e: MouseEvent): void => {
     this.state.mouseX = e.clientX;
     this.state.mouseY = e.clientY;
-
-    if (document.pointerLockElement === this.container || this.mouseButtons.has(2)) {
-      this.cameraYaw -= e.movementX * 0.003;
-      this.cameraPitch = Math.max(0.1, Math.min(1.4, this.cameraPitch - e.movementY * 0.003));
-    }
+    if (!this.mouseButtons.has(2)) return;
+    this.cameraYaw -= e.movementX * 0.005;
+    this.cameraPitch = Math.max(0.15, Math.min(1.15, this.cameraPitch - e.movementY * 0.004));
   };
 
   private onWheel = (e: WheelEvent): void => {
-    this.cameraDistance = Math.max(6, Math.min(24, this.cameraDistance + e.deltaY * 0.01));
+    if (this.isUi(e.target)) return;
+    e.preventDefault();
+    const delta = Math.max(-40, Math.min(40, e.deltaY));
+    this.cameraDistance = Math.max(4.5, Math.min(48, this.cameraDistance + delta * 0.02));
   };
 
   private onTouchStart = (e: TouchEvent): void => {
-    if (e.touches.length === 1) {
-      const touch = e.touches[0];
-      if (touch.clientX < this.container.clientWidth / 2) {
-        this.touchJoystick.active = true;
-        this.touchJoystick.startX = touch.clientX;
-        this.touchJoystick.startY = touch.clientY;
-        this.touchJoystick.currentX = touch.clientX;
-        this.touchJoystick.currentY = touch.clientY;
-        e.preventDefault();
-      } else {
-        this.state.attack = true;
-      }
+    if (this.isUi(e.target)) return;
+    if (e.touches.length >= 2) {
+      const a = e.touches[0];
+      const b = e.touches[1];
+      this.pinchDistance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      e.preventDefault();
+      return;
     }
+    const touch = e.touches[0];
+    if (touch.clientX < this.container.clientWidth * 0.42) {
+      this.touchJoystick.active = true;
+      this.touchJoystick.startX = touch.clientX;
+      this.touchJoystick.startY = touch.clientY;
+      this.touchJoystick.currentX = touch.clientX;
+      this.touchJoystick.currentY = touch.clientY;
+      e.preventDefault();
+      return;
+    }
+    this.lookTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY, moved: false };
   };
 
   private onTouchMove = (e: TouchEvent): void => {
-    if (this.touchJoystick.active && e.touches.length >= 1) {
+    if (e.touches.length >= 2 && this.pinchDistance !== null) {
+      const a = e.touches[0];
+      const b = e.touches[1];
+      const next = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      this.cameraDistance = Math.max(4.5, Math.min(48, this.cameraDistance - (next - this.pinchDistance) * 0.05));
+      this.pinchDistance = next;
+      e.preventDefault();
+      return;
+    }
+    if (this.lookTouch) {
+      const touch = Array.from(e.touches).find((item) => item.identifier === this.lookTouch!.id);
+      if (touch) {
+        const dx = touch.clientX - this.lookTouch.x;
+        const dy = touch.clientY - this.lookTouch.y;
+        if (Math.hypot(dx, dy) > 8) this.lookTouch.moved = true;
+        this.cameraYaw -= dx * 0.008;
+        this.cameraPitch = Math.max(0.15, Math.min(1.15, this.cameraPitch - dy * 0.006));
+        this.lookTouch.x = touch.clientX;
+        this.lookTouch.y = touch.clientY;
+        e.preventDefault();
+      }
+    }
+    if (this.touchJoystick.active) {
       const touch = e.touches[0];
       this.touchJoystick.currentX = touch.clientX;
       this.touchJoystick.currentY = touch.clientY;
@@ -135,8 +169,11 @@ export class InputManager {
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
-    if (e.touches.length === 0) {
-      this.touchJoystick.active = false;
+    if (e.touches.length < 2) this.pinchDistance = null;
+    if (e.touches.length === 0) this.touchJoystick.active = false;
+    if (this.lookTouch && !Array.from(e.touches).some((touch) => touch.identifier === this.lookTouch!.id)) {
+      if (!this.lookTouch.moved) this.state.attack = true;
+      this.lookTouch = null;
     }
   };
 
@@ -215,6 +252,30 @@ export class InputManager {
     this.cameraYaw = Math.atan2(-dx, -dz);
     this.cameraPitch = 0.4;
     this.cameraDistance = 12;
+  }
+
+  resetView(facing: number): void {
+    this.overview = false;
+    this.cameraYaw = facing + Math.PI;
+    this.cameraPitch = 0.42;
+    this.cameraDistance = 12;
+  }
+
+  toggleOverview(): boolean {
+    this.overview = !this.overview;
+    if (this.overview) {
+      this.savedView = { pitch: this.cameraPitch, distance: this.cameraDistance };
+      this.cameraPitch = 1.05;
+      this.cameraDistance = 42;
+    } else {
+      this.cameraPitch = this.savedView.pitch;
+      this.cameraDistance = this.savedView.distance;
+    }
+    return this.overview;
+  }
+
+  isOverview(): boolean {
+    return this.overview;
   }
 
   dispose(): void {
